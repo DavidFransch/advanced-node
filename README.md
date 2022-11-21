@@ -285,6 +285,208 @@ class PromiseQueue {
 
 var delayQueue = new PromiseQueue(tasks, 2);
 delayQueue.run();
+/*
+Final Result:
+todo: []
+running: []
+complete: [X,X,X,X,X,X,X,X,X,X]
+*/
 ```
 
 ## Streams
+Streams help to create performant applications.
+
+Readable Streams:
+(Below snippet creates a class that can use streams readable to create our own stream)
+```javascript
+const { Readable } = require('stream');
+
+const peaks = [
+    "Tallac",
+    "Ralston",
+    "Rubicon",
+    "Twin Peaks",
+    "Castle Peak",
+    "Rose",
+    "Freel Peak"
+];
+
+class StreamFromArray extends Readable {
+    constructor(array) {
+        super({ objectMode: true });
+        this.array = array;
+        this.index = 0;
+    }
+
+    _read() {
+      if(this.index < this.array.length){
+          const chunk = {
+            data: this.array[this.index],
+            index: this.index
+          };
+          this.push(chunk);
+          this.index += 1;
+      }
+      else {
+      this.push(null);
+      }
+    }
+}
+const peakStream = new StreamFromArray(peaks);
+peakStream.on('data', (chunk) => console.log(chunk));
+peakStream.on('end', () => console.log('done'));
+```
+
+Working with `fs` read stream:
+```javascript
+const fs = require('fs');
+const readStream = fs.createReadStream('./powder-day.mp4');
+
+readStream.on('data', (chunk) => {
+  console.log('reading little chunk\n', chunk.length);
+});
+
+readStream.on('end', () => {
+  console.log('read stream finished');
+});
+
+readStream.on('error', (error) => {
+  console.log('an error has occurred');
+  console.log(error);
+});
+
+readStream.pause();
+process.stdin.on('data', (chunk) => {
+  if(chunk.toString().trim() === 'finish') {
+    readStream.resume();
+  }
+  readStream.read();
+});
+```
+
+Making a copy using writable streams:
+```javascript
+const { createReadStream, createWriteStream } = require('fs');
+
+const readStream = createReadStream('./powder-day.mp4');
+const writeStream = createWriteStream('./copy-of-powder-day.mp4');
+
+readStream.on('data', (chunk) => {
+  writeStream.write(chunk);
+});
+
+
+readStream.on('error', (error) => {
+  console.log('an error has occurred');
+  console.log(error);
+});
+
+readStream.on('end', () => {
+  writeStream.end();
+});
+
+writeStream.on('close', () => {
+  process.stdout.write('file copied\n');
+});
+```
+
+Managing `backpressure` and using a custom `highWaterMark`:
+
+```javascript
+const { createReadStream, createWriteStream } = require('fs');
+
+const readStream = createReadStream('../../powder-day.mp4');
+const writeStream = createWriteStream('./copy.mp4', { 
+    highWaterMark: 1628920 
+});
+
+readStream.on('data', (chunk) => {
+    const result = writeStream.write(chunk);
+    if(!result) {
+        console.log('backpressure');
+        readStream.pause();
+    }
+});
+
+readStream.on('error', (error) => {
+    console.log('an error occurred', error.message);
+});
+
+readStream.on('end', () => {
+    writeStream.end();
+});
+
+writeStream.on('drain', () => {
+    console.log('drained');
+    readStream.resume();
+});
+
+writeStream.on('close', () => {
+    process.stdout.write('file copied\n');
+});
+
+```
+
+Reducing amount of code with `pipe`:
+
+```javascript
+const { createReadStream, createWriteStream } = require('fs');
+
+const readStream = createReadStream('../../powder-day.mp4');
+const writeStream = createWriteStream('./copy.mp4', { 
+    highWaterMark: 1628920 
+});
+
+readStream.pipe(writeStream).on('error', console.error); // automatically handles back pressure
+
+// In terminal -> echo "Hello World" | node .
+// or
+// cat ./sample.txt | node .
+```
+
+Duplex Streams:
+(Implements both readable and writable - use to compose streams into complex pipelines)
+```javascript
+const { PassThrough } = require('stream');
+const { createReadStream, createWriteStream } = require('fs');
+
+const readStream = createReadStream('../../powder-day.mp4');
+const writeStream = createWriteStream('./copy.mp4');
+
+const report = new PassThrough();
+
+var total = 0;
+report.on('data', (chunk) => {
+    total += chunk.length;
+    console.log('bytes:', total);
+})
+
+readStream.pipe(report).pipe(writeStream);
+```
+
+Transform Stream:
+```javascript
+const { Transform } = require('stream');
+
+class ReplaceText extends Transform {
+    constructor(char) {
+        super();
+        this.replaceChar = char;
+    }
+    _transform(chunk, encoding, callback) {
+        const transformChunk = chunk.toString().replace(/[a-z]|[A-Z]|[0-9]/g, this.replaceChar);
+        this.push(transformChunk);
+        callback();
+    }
+
+    _flush(callback) {
+        this.push('more stuff is being passed...');
+        callback();
+    }
+}
+
+var xStream = new ReplaceText('x');
+process.stdin
+    .pipe(xStream)
+    .pipe(process.stdout);
+```
